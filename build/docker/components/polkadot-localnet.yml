@@ -1,0 +1,13 @@
+version: '3'
+
+services:
+  polkadot-localnet:
+    container_name: polkadot-localnet
+    restart: unless-stopped
+    image: parity/polkadot
+    ports:
+      - "9933:9933"
+      - "9944:9944"
+    volumes:
+      - "../../scripts:/docker/scripts"
+    entrypoint: "/docker/scripts/polkadot-mock.sh"

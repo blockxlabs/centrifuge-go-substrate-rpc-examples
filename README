@@ -1,0 +1,12 @@
+Examples of sending transactions using 
+Sr25519 Ed25519
+
+Preq: Install Docker
+
+Run the docker container
+docker-compose -f ${path}build/docker/components/polkadot-localnet.yml  up --force-recreate   --remove-orphans -d 
+
+Run 
+Debug from VS Code
+or 
+``` go run main ```
