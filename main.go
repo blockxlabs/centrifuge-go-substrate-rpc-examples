@@ -2,21 +2,40 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
+	"math/big"
 	"os/exec"
+	"strconv"
 	"strings"
 
-	gsrpc "github.com/centrifuge/go-substrate-rpc-client"
-	"github.com/centrifuge/go-substrate-rpc-client/config"
-	"github.com/centrifuge/go-substrate-rpc-client/signature"
-	"github.com/centrifuge/go-substrate-rpc-client/types"
+	gsrpc "github.com/centrifuge/go-substrate-rpc-client/v2"
+	"github.com/centrifuge/go-substrate-rpc-client/v2/config"
+	"github.com/centrifuge/go-substrate-rpc-client/v2/signature"
+	"github.com/centrifuge/go-substrate-rpc-client/v2/types"
 	"github.com/minio/blake2b-simd"
+
+	iScale "github.com/itering/scale.go"
+	iTypes "github.com/itering/scale.go/types"
+	iUtil "github.com/itering/subscan/util"
+	iSS58 "github.com/itering/subscan/util/ss58"
+	iMetadata "github.com/itering/substrate-api-rpc/metadata"
+	iRPC "github.com/itering/substrate-api-rpc/rpc"
+	iWspool "github.com/itering/substrate-api-rpc/websocket"
 )
 
 func main() {
+	// Get Height
+	// getHeight()
+
+	// Read Block Using Centrifuge
+	// readBlockUsingCentrifuge()
+
+	// read block using Itering
+	readBlockUsingItering()
 	//Send Tokens from Sr25519 account to Ed25519
-	transferAliceSr25519ToAliceEd25519()
+	// transferAliceSr25519ToAliceEd25519()
 
 	// Send Tokens from Sr25519 account to Ecdsa
 	// transferAliceSr25519ToAliceEcdsa()
@@ -30,11 +49,272 @@ func main() {
 	// transferAliceEcdsaToBobEd25519()
 
 	// Send Tokens from Ed25519 to Shnorkell
-	transferAliceEd25519ToBobSr25519()
+	// transferAliceEd25519ToBobSr25519()
 
 	// TODO:
 	// Send Tokens from Ed25519 to Ecdsa
 	// transferAliceEd25519ToBobEcdsa()
+}
+
+func readBlockUsingItering() {
+	SetWSConnection()
+	blockHash := "0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b"
+
+	codedMetadataAtHash, _ := iRPC.GetMetadataByHash(nil, blockHash)
+	metadataInBytes := iUtil.HexToBytes(codedMetadataAtHash)
+	m := iScale.MetadataDecoder{}
+	m.Init(metadataInBytes)
+	m.Process()
+
+	iMetadata.Latest(&iMetadata.RuntimeRaw{
+		Spec: 12,
+		Raw:  strings.TrimPrefix(codedMetadataAtHash, "0x"),
+	})
+
+	currentMetadata := iMetadata.RuntimeMetadata[12]
+	v := &iRPC.JsonRpcResult{}
+	err := iWspool.SendWsRequest(nil, v, iRPC.ChainGetBlock(0, blockHash))
+	if err != nil {
+		fmt.Println("Could not read the block", err)
+	}
+	rpcBlock := v.ToBlock()
+
+	blockHeight, err := strconv.ParseInt(hexaNumberToInteger(rpcBlock.Block.Header.Number), 16, 64)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("BXL: readBlockUsingItering: blockHeight: ", blockHeight)
+
+	decodedExtrinsics, _ := decodeExtrinsics(rpcBlock.Block.Extrinsics, currentMetadata, 12)
+
+	for _, e := range decodedExtrinsics {
+		_, err := parseExtrinsic(&e, blockHeight)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
+}
+
+// hexaNumberToInteger
+func hexaNumberToInteger(hexaString string) string {
+	// replace 0x or 0X with empty String
+	numberStr := strings.Replace(hexaString, "0x", "", -1)
+	numberStr = strings.Replace(numberStr, "0X", "", -1)
+	return numberStr
+}
+
+// UtilityBatchCall Utility Batch Call
+type UtilityBatchCall struct {
+	CallIndex    string                  `json:"call_index"`
+	CallFunction string                  `json:"call_function"`
+	CallModule   string                  `json:"call_module"`
+	CallArgs     []iTypes.ExtrinsicParam `json:"call_args"`
+}
+
+// TxInItem Transaction Item
+type TxInItem struct {
+	BlockHeight int64  `json:"block_height"`
+	Tx          string `json:"tx"`     // Block Hash
+	Memo        string `json:"memo"`   // Remarks Text
+	Sender      string `json:"sender"` // From Address
+	To          string `json:"to"`     // To Address
+	Coins       []Coin `json:"coins"`
+	Gas         Coin   `json:"gas"` // Gas price
+}
+
+// DOTAsset DOT
+var DOTAsset = Asset{Chain: "DOT", Symbol: "DOT", Ticker: "DOT"}
+
+// Chain is an alias of string , represent a block chain
+type Chain string
+
+// Symbol represent an asset
+type Symbol string
+
+// Ticker represent an asset
+type Ticker string
+
+// Asset Struct
+type Asset struct {
+	Chain  Chain  `json:"chain"`
+	Symbol Symbol `json:"symbol"`
+	Ticker Ticker `json:"ticker"`
+}
+
+// Coin struct
+type Coin struct {
+	Asset  Asset    `json:"asset"`
+	Amount *big.Int `json:"amount"`
+}
+
+func parseExtrinsic(e *iScale.ExtrinsicDecoder, blockHeight int64) (TxInItem, error) {
+	noTxIn := TxInItem{}
+	err := iParseUtilityBatch(e, blockHeight)
+	if err != nil {
+		return noTxIn, err
+	}
+	return noTxIn, nil
+}
+
+func iParseUtilityBatch(e *iScale.ExtrinsicDecoder, blockHeight int64) error {
+	if e.CallModule.Name == "Utility" && e.Call.Name == "batch" {
+		calls := &[]UtilityBatchCall{}
+		err := unmarshalAny(calls, e.Params[0].Value)
+		if err != nil {
+			return fmt.Errorf("unable to decode utility batch calls: %v", e.Params[0].Value)
+		}
+		fromAddressStr := fmt.Sprintf("%v", e.Address)
+		fromAddress := iSS58.Encode(fromAddressStr, iUtil.StringToInt("42"))
+		dest := ""
+		value := ""
+		memo := ""
+
+		for _, c := range *calls {
+			for _, a := range c.CallArgs {
+				switch a.Name {
+				case "dest":
+					dest = iSS58.Encode(a.Value.(string), iUtil.StringToInt("42"))
+					break
+				case "value":
+					value = a.Value.(string)
+					break
+				case "_remark":
+					decodedMemo, err := hex.DecodeString(a.Value.(string))
+					if err != nil {
+						return fmt.Errorf("BXL: iParseUtilityBatch: unable to decode remark: %v", a.Value.(string))
+					}
+					memo = string(decodedMemo)
+					break
+				}
+			}
+		}
+		amount := new(big.Int)
+		amount, ok := amount.SetString(value, 10)
+		if !ok {
+			return fmt.Errorf("BXL: iParseUtilityBatch: unable to set amount string")
+		}
+		txInItem := INewUtilityBatchData(blockHeight, "", memo, fromAddress, dest, amount)
+		fmt.Println("BXL: iParseUtilityBatch: txInItem ", txInItem)
+	}
+	return nil
+}
+
+func unmarshalAny(r interface{}, raw interface{}) error {
+	j, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(j, r)
+}
+
+func INewUtilityBatchData(BlockHeight int64, Tx string, Memo string, Sender string, To string, Amount *big.Int) *TxInItem {
+	coin := Coin{DOTAsset, Amount}
+	txInItem := &TxInItem{
+		BlockHeight: BlockHeight,
+		Tx:          Tx,
+		Memo:        Memo,
+		Sender:      Sender,
+		To:          To,
+	}
+	txInItem.Coins = append(txInItem.Coins, coin)
+	txInItem.Gas = coin // BXL TODO: Gas price
+	return txInItem
+}
+
+func decodeExtrinsics(list []string, metadata *iMetadata.Instant, spec int) (r []iScale.ExtrinsicDecoder, err error) {
+	defer func() {
+		if fatal := recover(); fatal != nil {
+			err = fmt.Errorf("Recovering from panic in DecodeExtrinsic: %v", fatal)
+		}
+	}()
+
+	m := iTypes.MetadataStruct(*metadata)
+	for _, extrinsicRaw := range list {
+		e := iScale.ExtrinsicDecoder{}
+		option := iTypes.ScaleDecoderOption{Metadata: &m, Spec: spec}
+		e.Init(iTypes.ScaleBytes{Data: iUtil.HexToBytes(extrinsicRaw)}, &option)
+		e.Process()
+
+		r = append(r, e)
+	}
+	return r, nil
+}
+
+func SetWSConnection() {
+	iWspool.SetEndpoint("wss://westend-rpc.polkadot.io")
+}
+
+func readBlockUsingCentrifuge() error {
+	api := NewSubstrateAPI()
+
+	blockHeight, err := getHeight()
+	if err != nil {
+		return err
+	}
+	fmt.Println("BXL: readBlockUsingCentrifuge: blockHeight:", blockHeight)
+	cBH := uint64(blockHeight)
+
+	blockHash, err := api.RPC.Chain.GetBlockHash(cBH)
+	if err != nil {
+		return err
+	}
+	fmt.Println("BXL: readBlockUsingCentrifuge: blockHash: ", blockHash.Hex())
+	// blockHashString := blockHash.Hex()
+	var blockHashString = "0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b" // Utility Batch on Westend
+	newBlockHash, err := types.NewHashFromHexString(blockHashString)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("BXL: readBlockUsingCentrifuge: newBlockHash: ", newBlockHash)
+	// Get the block
+	block, err := api.RPC.Chain.GetBlock(newBlockHash)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("BXL: readBlockUsingCentrifuge: block: ", block)
+
+	meta, err := api.RPC.State.GetMetadata(newBlockHash)
+	if err != nil {
+		panic(err)
+	}
+
+	// fmt.Println("BXL: readBlockUsingCentrifuge: meta: ", meta)
+	// Go through each Extrinsics
+	for i, ext := range block.Block.Extrinsics {
+		// i++
+		fmt.Println("EXT # ", i, " --> ", ext.Method.CallIndex)
+
+		for j, mod := range meta.AsMetadataV12.Modules {
+			j++
+			fmt.Println("Args: ", ext.Method.Args)
+
+			if mod.Index == ext.Method.CallIndex.SectionIndex {
+				fmt.Println("Current EXT is : ", mod.Name, ".", mod.Calls[ext.Method.CallIndex.MethodIndex].Name)
+				fmt.Println("Args: ", ext.Method.Args)
+				var current types.EventAssetTransferred
+				types.DecodeFromBytes(ext.Method.Args, &current)
+				// var current types.Args
+				// err = types.DecodeFromBytes(ext.Method.Args, &current);
+				// if (err!= nil) {
+				//   panic(err)
+				// }
+			}
+
+		}
+
+		// // Find the correct Args Type
+		// var current types.Args
+		// err = types.DecodeFromBytes(ext.Method.Args, &current);
+		// if (err!= nil) {
+		//   panic(err)
+		// }
+
+		//   // ext.Decode()
+	}
+
+	// fmt.Println("meta is {}", meta)
+	return nil
 }
 
 func NewSubstrateAPI() *gsrpc.SubstrateAPI {
@@ -50,6 +330,23 @@ func SetSerDeOptions() types.SerDeOptions {
 	opts := types.SerDeOptions{NoPalletIndices: true}
 	types.SetSerDeOptions(opts)
 	return opts
+}
+
+func getHeight() (int64, error) {
+	api := NewSubstrateAPI()
+	finalizedBlockHash, err := api.RPC.Chain.GetFinalizedHead()
+	if err != nil {
+		return 0, err
+	}
+
+	fmt.Println("BXL: finalizedBlockHash: ", finalizedBlockHash)
+	signedBlock, err := api.RPC.Chain.GetBlock(finalizedBlockHash)
+	if err != nil {
+		return 0, err
+	}
+
+	fmt.Println("BXL: GetHeight: ", int64(signedBlock.Block.Header.Number))
+	return int64(signedBlock.Block.Header.Number), nil
 }
 
 func GetMetadataLatest(api *gsrpc.SubstrateAPI) *types.Metadata {

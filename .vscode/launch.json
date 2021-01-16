@@ -10,8 +10,8 @@
             "request": "launch",
             "mode": "auto",
             "program": "${fileDirname}",
-            // "env": {"RPC_URL": "https://westend-rpc.polkadot.io"},
-            "env": {"RPC_URL": "ws://localhost:9944"},
+            "env": {"RPC_URL": "https://westend-rpc.polkadot.io"},
+            // "env": {"RPC_URL": "ws://localhost:9944"},
             "args": []
         }
     ]
