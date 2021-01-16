@@ -9,4 +9,4 @@ docker-compose -f ${path}build/docker/components/polkadot-localnet.yml  up --for
 Run 
 Debug from VS Code
 or 
-``` go run main ```
+go run main 
