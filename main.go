@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 
 	gsrpc "github.com/centrifuge/go-substrate-rpc-client/v2"
 	"github.com/centrifuge/go-substrate-rpc-client/v2/config"
+	"github.com/centrifuge/go-substrate-rpc-client/v2/scale"
 	"github.com/centrifuge/go-substrate-rpc-client/v2/signature"
 	"github.com/centrifuge/go-substrate-rpc-client/v2/types"
 	"github.com/minio/blake2b-simd"
@@ -29,11 +31,15 @@ func main() {
 	// Get Height
 	// getHeight()
 
+	// Get Account
+	pk := PubKey("0x68ea05199a3fa035087e42c1cda32654d7d5a6540feac4587a2de4f92434e903")
+	GetAccount(pk)
+
 	// Read Block Using Centrifuge
 	// readBlockUsingCentrifuge()
 
 	// read block using Itering
-	readBlockUsingItering()
+	// readBlockUsingItering()
 	//Send Tokens from Sr25519 account to Ed25519
 	// transferAliceSr25519ToAliceEd25519()
 
@@ -102,6 +108,45 @@ func hexaNumberToInteger(hexaString string) string {
 	numberStr := strings.Replace(hexaString, "0x", "", -1)
 	numberStr = strings.Replace(numberStr, "0X", "", -1)
 	return numberStr
+}
+
+// PubKey String
+type (
+	PubKey string
+)
+
+func GetAccount(pk PubKey) {
+
+	api, err := gsrpc.NewSubstrateAPI(config.Default().RPCURL)
+	if err != nil {
+		panic(err)
+	}
+
+	meta, err := api.RPC.State.GetMetadataLatest()
+	if err != nil {
+		panic(err)
+	}
+
+	// Known account we want to use (available on dev chain, with funds)
+	testAccount, err := types.HexDecodeString(string(pk))
+	if err != nil {
+		panic(err)
+	}
+
+	key, err := types.CreateStorageKey(meta, "Balances", "FreeBalance", testAccount, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	// Retrieve the initial balance
+	var previous types.U128
+	ok, err := api.RPC.State.GetStorageLatest(key, &previous)
+	if err != nil || !ok {
+		panic(err)
+	}
+
+	fmt.Printf("%#x has a balance of %v\n", testAccount, previous)
+	fmt.Printf("You may leave this example running and transfer any value to %#x\n", testAccount)
 }
 
 // UtilityBatchCall Utility Batch Call
@@ -246,75 +291,87 @@ func SetWSConnection() {
 }
 
 func readBlockUsingCentrifuge() error {
+
 	api := NewSubstrateAPI()
+	metadata := GetMetadataLatest(api)
+	types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: true})
 
-	blockHeight, err := getHeight()
-	if err != nil {
-		return err
-	}
-	fmt.Println("BXL: readBlockUsingCentrifuge: blockHeight:", blockHeight)
-	cBH := uint64(blockHeight)
-
-	blockHash, err := api.RPC.Chain.GetBlockHash(cBH)
+	/// 0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b
+	blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
 	if err != nil {
 		return err
 	}
 	fmt.Println("BXL: readBlockUsingCentrifuge: blockHash: ", blockHash.Hex())
-	// blockHashString := blockHash.Hex()
-	var blockHashString = "0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b" // Utility Batch on Westend
-	newBlockHash, err := types.NewHashFromHexString(blockHashString)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println("BXL: readBlockUsingCentrifuge: newBlockHash: ", newBlockHash)
 	// Get the block
-	block, err := api.RPC.Chain.GetBlock(newBlockHash)
+	block, err := api.RPC.Chain.GetBlock(blockHash)
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println("BXL: readBlockUsingCentrifuge: block: ", block)
 
-	meta, err := api.RPC.State.GetMetadata(newBlockHash)
-	if err != nil {
-		panic(err)
-	}
-
-	// fmt.Println("BXL: readBlockUsingCentrifuge: meta: ", meta)
 	// Go through each Extrinsics
 	for i, ext := range block.Block.Extrinsics {
-		// i++
-		fmt.Println("EXT # ", i, " --> ", ext.Method.CallIndex)
+		// Match to Batch Transaction
+		if ext.Method.CallIndex.SectionIndex == 16 && ext.Method.CallIndex.MethodIndex == 0 {
+			// Decode the batch Transaction Args HERE
+			types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: false})
 
-		for j, mod := range meta.AsMetadataV12.Modules {
-			j++
-			fmt.Println("Args: ", ext.Method.Args)
+			decoder := scale.NewDecoder(bytes.NewReader(ext.Method.Args))
 
-			if mod.Index == ext.Method.CallIndex.SectionIndex {
-				fmt.Println("Current EXT is : ", mod.Name, ".", mod.Calls[ext.Method.CallIndex.MethodIndex].Name)
-				fmt.Println("Args: ", ext.Method.Args)
-				var current types.EventAssetTransferred
-				types.DecodeFromBytes(ext.Method.Args, &current)
-				// var current types.Args
-				// err = types.DecodeFromBytes(ext.Method.Args, &current);
-				// if (err!= nil) {
-				//   panic(err)
-				// }
+			// determine number of calls
+			n, err := decoder.DecodeUintCompact()
+			if err != nil {
+				return err
 			}
-
+			fmt.Println("CALLS # ", i, " --> ", n)
+			for call := uint64(0); call < n.Uint64(); call++ {
+				callIndex := types.CallIndex{}
+				err = decoder.Decode(&callIndex)
+				if err != nil {
+					return err
+				}
+				// how is it determining the call Index?
+				fmt.Println("CALLINDEX # ", i, " --> ", callIndex)
+				callFunction := findModule(metadata, callIndex)
+				for _, callArg := range callFunction.Args {
+					if callArg.Type == "<T::Lookup as StaticLookup>::Source" {
+						var argValue = types.AccountID{}
+						_ = decoder.Decode(&argValue)
+						fmt.Println(callArg.Name, " = ", argValue)
+					} else if callArg.Type == "Compact<T::Balance>" {
+						var argValue = types.UCompact{}
+						_ = decoder.Decode(&argValue)
+						fmt.Println(callArg.Name, " = ", argValue)
+					} else if callArg.Type == "Vec<u8>" {
+						var argValue = types.Bytes{}
+						// hex.DecodeString(a.Value.(string))
+						_ = decoder.Decode(&argValue)
+						value := string(argValue)
+						fmt.Println(callArg.Name, " = ", value)
+					}
+				}
+			}
 		}
-
-		// // Find the correct Args Type
-		// var current types.Args
-		// err = types.DecodeFromBytes(ext.Method.Args, &current);
-		// if (err!= nil) {
-		//   panic(err)
-		// }
-
-		//   // ext.Decode()
 	}
-
-	// fmt.Println("meta is {}", meta)
 	return nil
+
+}
+
+func findModule(metadata *types.Metadata, index types.CallIndex) types.FunctionMetadataV4 {
+	for _, mod := range metadata.AsMetadataV12.Modules {
+		if mod.Index == index.SectionIndex {
+			fmt.Println("Find module  ", mod.Name)
+			if mod.Name == "Offences" {
+				for _, mod := range metadata.AsMetadataV12.Modules {
+					if mod.Index == 0 {
+						return mod.Calls[1]
+					}
+				}
+			}
+			return mod.Calls[index.MethodIndex]
+		}
+	}
+	panic("Unknown call")
 }
 
 func NewSubstrateAPI() *gsrpc.SubstrateAPI {
