@@ -32,9 +32,11 @@ func main() {
 	// getHeight()
 
 	// Get Account
-	pk := PubKey("0x68ea05199a3fa035087e42c1cda32654d7d5a6540feac4587a2de4f92434e903")
+	// pk := PubKey("0x68ea05199a3fa035087e42c1cda32654d7d5a6540feac4587a2de4f92434e903")
+	// local testing
+	// alicePK := PubKey("0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d")
 	GetAccount(pk)
-
+	// GetAddress(pk)
 	// Read Block Using Centrifuge
 	// readBlockUsingCentrifuge()
 
@@ -110,6 +112,22 @@ func hexaNumberToInteger(hexaString string) string {
 	return numberStr
 }
 
+// func GetAddress(poolPubKey PubKey) (string, error) {
+// 	polkadotAddress, err := ss58.Encode(poolPubKey, ss58.PolkadotPrefix)
+// 	if err != nil {
+// 		return "", err
+// 	}
+// 	fmt.Printf("BXL: polkadotAddress: %v", polkadotAddress)
+
+// address, err := NewAddress(polkadotAddress)
+// if err != nil {
+// 	return NoAddress, err
+// }
+// fmt.Printf("BXL: address: %v", address)
+
+// 	return polkadotAddress, nil
+// }
+
 // PubKey String
 type (
 	PubKey string
@@ -122,6 +140,8 @@ func GetAccount(pk PubKey) {
 		panic(err)
 	}
 
+	types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: true})
+
 	meta, err := api.RPC.State.GetMetadataLatest()
 	if err != nil {
 		panic(err)
@@ -133,19 +153,19 @@ func GetAccount(pk PubKey) {
 		panic(err)
 	}
 
-	key, err := types.CreateStorageKey(meta, "Balances", "FreeBalance", testAccount, nil)
+	key, err := types.CreateStorageKey(meta, "System", "Account", testAccount, nil)
 	if err != nil {
 		panic(err)
 	}
 
 	// Retrieve the initial balance
-	var previous types.U128
-	ok, err := api.RPC.State.GetStorageLatest(key, &previous)
+	var accountInfo types.AccountInfo
+	ok, err := api.RPC.State.GetStorageLatest(key, &accountInfo)
 	if err != nil || !ok {
 		panic(err)
 	}
 
-	fmt.Printf("%#x has a balance of %v\n", testAccount, previous)
+	fmt.Printf("%#x has a balance of %v\n", testAccount, accountInfo.Data.Free.String())
 	fmt.Printf("You may leave this example running and transfer any value to %#x\n", testAccount)
 }
 

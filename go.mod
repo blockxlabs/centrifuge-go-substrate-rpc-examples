@@ -3,6 +3,7 @@ module main
 go 1.15
 
 require (
+	github.com/JFJun/go-substrate-crypto v1.0.1
 	github.com/centrifuge/go-substrate-rpc-client/v2 v2.0.1
 	github.com/ethereum/go-ethereum v1.9.25 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
