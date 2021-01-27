@@ -183,9 +183,10 @@ type U8 uint8
 
 // AccountInfo data
 type AccountInfo struct {
-	Nonce    U32
-	Refcount U32
-	Data     struct {
+	Nonce     U32
+	Consumers U32
+	Providers U32
+	Data      struct {
 		Free       U128
 		Reserved   U128
 		MiscFrozen U128
