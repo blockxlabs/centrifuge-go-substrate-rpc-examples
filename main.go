@@ -34,8 +34,8 @@ func main() {
 	// Get Account
 	// pk := PubKey("0x68ea05199a3fa035087e42c1cda32654d7d5a6540feac4587a2de4f92434e903")
 	// local testing
-	// alicePK := PubKey("0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d")
-	GetAccount(pk)
+	alicePK := PubKey("0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d")
+	GetAccount(alicePK)
 	// GetAddress(pk)
 	// Read Block Using Centrifuge
 	// readBlockUsingCentrifuge()
@@ -159,7 +159,8 @@ func GetAccount(pk PubKey) {
 	}
 
 	// Retrieve the initial balance
-	var accountInfo types.AccountInfo
+	// var accountInfo types.AccountInfo
+	var accountInfo AccountInfo
 	ok, err := api.RPC.State.GetStorageLatest(key, &accountInfo)
 	if err != nil || !ok {
 		panic(err)
@@ -167,6 +168,29 @@ func GetAccount(pk PubKey) {
 
 	fmt.Printf("%#x has a balance of %v\n", testAccount, accountInfo.Data.Free.String())
 	fmt.Printf("You may leave this example running and transfer any value to %#x\n", testAccount)
+}
+
+// U32 is an unsigned 32-bit integer
+type U32 uint32
+
+// U128 is an unsigned 128-bit integer, it is represented as a big.Int in Go.
+type U128 struct {
+	*big.Int
+}
+
+// U8 is an unsigned 8-bit integer
+type U8 uint8
+
+// AccountInfo data
+type AccountInfo struct {
+	Nonce    U32
+	Refcount U32
+	Data     struct {
+		Free       U128
+		Reserved   U128
+		MiscFrozen U128
+		FreeFrozen U128
+	}
 }
 
 // UtilityBatchCall Utility Batch Call
