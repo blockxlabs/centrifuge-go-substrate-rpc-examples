@@ -11,12 +11,19 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/JFJun/go-substrate-crypto/ss58"
 	gsrpc "github.com/centrifuge/go-substrate-rpc-client/v2"
 	"github.com/centrifuge/go-substrate-rpc-client/v2/config"
 	"github.com/centrifuge/go-substrate-rpc-client/v2/scale"
 	"github.com/centrifuge/go-substrate-rpc-client/v2/signature"
 	"github.com/centrifuge/go-substrate-rpc-client/v2/types"
 	"github.com/minio/blake2b-simd"
+
+	// gsrpc "github.com/centrifuge/go-substrate-rpc-client"
+	// "github.com/centrifuge/go-substrate-rpc-client/config"
+	// "github.com/centrifuge/go-substrate-rpc-client/scale"
+	// "github.com/centrifuge/go-substrate-rpc-client/signature"
+	// "github.com/centrifuge/go-substrate-rpc-client/types"
 
 	iScale "github.com/itering/scale.go"
 	iTypes "github.com/itering/scale.go/types"
@@ -32,13 +39,19 @@ func main() {
 	// getHeight()
 
 	// Get Account
+	// WestEnd Account
 	// pk := PubKey("0x68ea05199a3fa035087e42c1cda32654d7d5a6540feac4587a2de4f92434e903")
 	// local testing
-	alicePK := PubKey("0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d")
-	GetAccount(alicePK)
+	// alicePK := PubKey("0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d")
+	// GetAccount(pk)
+
+	// Get Address from bytes
+	// pkb := []byte{231, 243, 184, 176, 29, 241, 47, 222, 44, 169, 30, 235, 237, 245, 113, 144, 127, 22, 55, 214, 171, 227, 93, 235, 112, 78, 15, 138, 71, 98, 173, 50}
+	// GetAddressFromBytes(pkb)
+
 	// GetAddress(pk)
 	// Read Block Using Centrifuge
-	// readBlockUsingCentrifuge()
+	readBlockUsingCentrifuge()
 
 	// read block using Itering
 	// readBlockUsingItering()
@@ -62,6 +75,20 @@ func main() {
 	// TODO:
 	// Send Tokens from Ed25519 to Ecdsa
 	// transferAliceEd25519ToBobEcdsa()
+}
+
+func GetAddressFromBytes(pkb []byte) error {
+	fmt.Println("BXL: DOTChain pk bytes: ", pkb)
+	fmt.Println("BXL: ss58.PolkadotPrefix: ", ss58.PolkadotPrefix)
+	// GetAddress(poolPubKey common.PubKey) string
+	// GetAccount(poolPubKey common.PubKey) (common.Account, error)
+	polkadotAddress, err := ss58.Encode(pkb, ss58.PolkadotPrefix)
+	if err != nil {
+		fmt.Println("BXL: polkadotAddress error: ", err)
+		return err
+	}
+	fmt.Println("BXL: polkadotAddress: ", polkadotAddress)
+	return nil
 }
 
 func readBlockUsingItering() {
@@ -133,6 +160,15 @@ type (
 	PubKey string
 )
 
+type KeyringPair struct {
+	// URI is the derivation path for the private key in subkey
+	URI string
+	// Address is an SS58 address
+	Address string
+	// PublicKey
+	PublicKey []byte
+}
+
 func GetAccount(pk PubKey) {
 
 	api, err := gsrpc.NewSubstrateAPI(config.Default().RPCURL)
@@ -140,12 +176,19 @@ func GetAccount(pk PubKey) {
 		panic(err)
 	}
 
-	types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: true})
+	// types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: true})
 
 	meta, err := api.RPC.State.GetMetadataLatest()
 	if err != nil {
 		panic(err)
 	}
+
+	var TestKeyringPairAlice = KeyringPair{
+		URI:       "//Alice",
+		PublicKey: []byte{0xd4, 0x35, 0x93, 0xc7, 0x15, 0xfd, 0xd3, 0x1c, 0x61, 0x14, 0x1a, 0xbd, 0x4, 0xa9, 0x9f, 0xd6, 0x82, 0x2c, 0x85, 0x58, 0x85, 0x4c, 0xcd, 0xe3, 0x9a, 0x56, 0x84, 0xe7, 0xa5, 0x6d, 0xa2, 0x7d}, //nolint:lll
+		Address:   "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+	}
+	fmt.Println("print test key ring", TestKeyringPairAlice.PublicKey)
 
 	// Known account we want to use (available on dev chain, with funds)
 	testAccount, err := types.HexDecodeString(string(pk))
@@ -160,6 +203,9 @@ func GetAccount(pk PubKey) {
 
 	// Retrieve the initial balance
 	// var accountInfo types.AccountInfo
+	// 16777216000000000000000000
+	// 16777216000000000000000000
+
 	var accountInfo AccountInfo
 	ok, err := api.RPC.State.GetStorageLatest(key, &accountInfo)
 	if err != nil || !ok {
@@ -170,27 +216,15 @@ func GetAccount(pk PubKey) {
 	fmt.Printf("You may leave this example running and transfer any value to %#x\n", testAccount)
 }
 
-// U32 is an unsigned 32-bit integer
-type U32 uint32
-
-// U128 is an unsigned 128-bit integer, it is represented as a big.Int in Go.
-type U128 struct {
-	*big.Int
-}
-
-// U8 is an unsigned 8-bit integer
-type U8 uint8
-
-// AccountInfo data
+// AccountInfo data}
 type AccountInfo struct {
-	Nonce     U32
-	Consumers U32
-	Providers U32
-	Data      struct {
-		Free       U128
-		Reserved   U128
-		MiscFrozen U128
-		FreeFrozen U128
+	Nonce    types.U32
+	Refcount types.U32
+	Data     struct {
+		Free       types.U128
+		Reserved   types.U128
+		MiscFrozen types.U128
+		FreeFrozen types.U128
 	}
 }
 
@@ -211,6 +245,17 @@ type TxInItem struct {
 	To          string `json:"to"`     // To Address
 	Coins       []Coin `json:"coins"`
 	Gas         Coin   `json:"gas"` // Gas price
+}
+
+type TxIn struct {
+	Count string `json:"count"`
+	// Chain                common.Chain `json:"chain"`
+	TxArray              []TxInItem `json:"txArray"`
+	Filtered             bool       `json:"filtered"`
+	MemPool              bool       `json:"mem_pool"`          // indicate whether this item is in the mempool or not
+	SentUnFinalised      bool       `json:"sent_un_finalised"` // indicate whehter unfinalised tx had been sent to THORChain
+	Finalised            bool       `json:"finalised"`
+	ConfirmationRequired int64      `json:"confirmation_required"`
 }
 
 // DOTAsset DOT
@@ -336,23 +381,27 @@ func SetWSConnection() {
 }
 
 func readBlockUsingCentrifuge() error {
-
+	transactionItem := TxInItem{}
 	api := NewSubstrateAPI()
 	metadata := GetMetadataLatest(api)
 	types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: true})
 
 	/// 0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b
+	transactionItem.BlockHeight = 3443522
 	blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
 	if err != nil {
 		return err
 	}
 	fmt.Println("BXL: readBlockUsingCentrifuge: blockHash: ", blockHash.Hex())
+	transactionItem.Tx = blockHash.Hex()
 	// Get the block
 	block, err := api.RPC.Chain.GetBlock(blockHash)
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println("BXL: readBlockUsingCentrifuge: block: ", block)
+
+	// GET Transaction Gas price
 
 	// Go through each Extrinsics
 	for i, ext := range block.Block.Extrinsics {
@@ -383,21 +432,34 @@ func readBlockUsingCentrifuge() error {
 						var argValue = types.AccountID{}
 						_ = decoder.Decode(&argValue)
 						fmt.Println(callArg.Name, " = ", argValue)
+						fmt.Printf("\t\t%#x\n", argValue)
+						// transactionItem.To = value
 					} else if callArg.Type == "Compact<T::Balance>" {
 						var argValue = types.UCompact{}
 						_ = decoder.Decode(&argValue)
 						fmt.Println(callArg.Name, " = ", argValue)
+						argValueBigInt := big.Int(argValue)
+						amount := new(big.Int)
+						amount, ok := amount.SetString(argValueBigInt.String(), 10)
+						if !ok {
+							return fmt.Errorf("BXL: failed: unable to set amount string")
+						}
+						coin := Coin{DOTAsset, amount}
+						transactionItem.Coins = append(transactionItem.Coins, coin)
 					} else if callArg.Type == "Vec<u8>" {
 						var argValue = types.Bytes{}
 						// hex.DecodeString(a.Value.(string))
 						_ = decoder.Decode(&argValue)
 						value := string(argValue)
 						fmt.Println(callArg.Name, " = ", value)
+						transactionItem.Memo = value
 					}
 				}
 			}
 		}
 	}
+	fmt.Println("transaction Item: ", transactionItem)
+
 	return nil
 
 }
@@ -406,13 +468,6 @@ func findModule(metadata *types.Metadata, index types.CallIndex) types.FunctionM
 	for _, mod := range metadata.AsMetadataV12.Modules {
 		if mod.Index == index.SectionIndex {
 			fmt.Println("Find module  ", mod.Name)
-			if mod.Name == "Offences" {
-				for _, mod := range metadata.AsMetadataV12.Modules {
-					if mod.Index == 0 {
-						return mod.Calls[1]
-					}
-				}
-			}
 			return mod.Calls[index.MethodIndex]
 		}
 	}
