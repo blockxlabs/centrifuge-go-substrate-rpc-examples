@@ -18,6 +18,7 @@ import (
 	"github.com/centrifuge/go-substrate-rpc-client/v2/signature"
 	"github.com/centrifuge/go-substrate-rpc-client/v2/types"
 	"github.com/minio/blake2b-simd"
+	"github.com/vedhavyas/go-subkey"
 
 	// gsrpc "github.com/centrifuge/go-substrate-rpc-client"
 	// "github.com/centrifuge/go-substrate-rpc-client/config"
@@ -389,6 +390,8 @@ func readBlockUsingCentrifuge() error {
 	/// 0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b
 	transactionItem.BlockHeight = 3443522
 	blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
+	//Call(result interface{}, method string, args)
+	// api.Client.Call(	)
 	if err != nil {
 		return err
 	}
@@ -412,6 +415,9 @@ func readBlockUsingCentrifuge() error {
 
 			decoder := scale.NewDecoder(bytes.NewReader(ext.Method.Args))
 
+			sender, _ := subkey.SS58Address(ext.Signature.Signer.AsAccountID[:], uint8(42))
+			fmt.Println("BXL: sender: ", sender)
+			transactionItem.Sender = sender
 			// determine number of calls
 			n, err := decoder.DecodeUintCompact()
 			if err != nil {
@@ -431,9 +437,9 @@ func readBlockUsingCentrifuge() error {
 					if callArg.Type == "<T::Lookup as StaticLookup>::Source" {
 						var argValue = types.AccountID{}
 						_ = decoder.Decode(&argValue)
-						fmt.Println(callArg.Name, " = ", argValue)
-						fmt.Printf("\t\t%#x\n", argValue)
-						// transactionItem.To = value
+						ss58, _ := subkey.SS58Address(argValue[:], uint8(42))
+						fmt.Println(callArg.Name, " = ", ss58)
+						transactionItem.To = ss58
 					} else if callArg.Type == "Compact<T::Balance>" {
 						var argValue = types.UCompact{}
 						_ = decoder.Decode(&argValue)
