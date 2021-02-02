@@ -382,21 +382,23 @@ func SetWSConnection() {
 }
 
 func readBlockUsingCentrifuge() error {
-	transactionItem := TxInItem{}
+	txInbound := TxIn{
+		// Chain:    common.DOTChain,
+		Filtered: false,
+		MemPool:  false,
+	}
 	api := NewSubstrateAPI()
 	metadata := GetMetadataLatest(api)
 	types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: true})
 
 	/// 0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b
-	transactionItem.BlockHeight = 3443522
 	blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
 	//Call(result interface{}, method string, args)
-	// api.Client.Call(	)
+	// api.Client.Call(interface{}, "payment", "extrinsic, at")
 	if err != nil {
 		return err
 	}
 	fmt.Println("BXL: readBlockUsingCentrifuge: blockHash: ", blockHash.Hex())
-	transactionItem.Tx = blockHash.Hex()
 	// Get the block
 	block, err := api.RPC.Chain.GetBlock(blockHash)
 	if err != nil {
@@ -408,6 +410,10 @@ func readBlockUsingCentrifuge() error {
 
 	// Go through each Extrinsics
 	for i, ext := range block.Block.Extrinsics {
+		txInItem := TxInItem{}
+		txInItem.BlockHeight = 3443522
+		txInItem.Tx = blockHash.Hex()
+
 		// Match to Batch Transaction
 		if ext.Method.CallIndex.SectionIndex == 16 && ext.Method.CallIndex.MethodIndex == 0 {
 			// Decode the batch Transaction Args HERE
@@ -417,7 +423,7 @@ func readBlockUsingCentrifuge() error {
 
 			sender, _ := subkey.SS58Address(ext.Signature.Signer.AsAccountID[:], uint8(42))
 			fmt.Println("BXL: sender: ", sender)
-			transactionItem.Sender = sender
+			txInItem.Sender = sender
 			// determine number of calls
 			n, err := decoder.DecodeUintCompact()
 			if err != nil {
@@ -439,7 +445,7 @@ func readBlockUsingCentrifuge() error {
 						_ = decoder.Decode(&argValue)
 						ss58, _ := subkey.SS58Address(argValue[:], uint8(42))
 						fmt.Println(callArg.Name, " = ", ss58)
-						transactionItem.To = ss58
+						txInItem.To = ss58
 					} else if callArg.Type == "Compact<T::Balance>" {
 						var argValue = types.UCompact{}
 						_ = decoder.Decode(&argValue)
@@ -451,20 +457,24 @@ func readBlockUsingCentrifuge() error {
 							return fmt.Errorf("BXL: failed: unable to set amount string")
 						}
 						coin := Coin{DOTAsset, amount}
-						transactionItem.Coins = append(transactionItem.Coins, coin)
+						txInItem.Coins = append(txInItem.Coins, coin)
 					} else if callArg.Type == "Vec<u8>" {
 						var argValue = types.Bytes{}
 						// hex.DecodeString(a.Value.(string))
 						_ = decoder.Decode(&argValue)
 						value := string(argValue)
 						fmt.Println(callArg.Name, " = ", value)
-						transactionItem.Memo = value
+						txInItem.Memo = value
 					}
 				}
 			}
+			fmt.Println("transaction Item: ", txInItem)
+			txInbound.TxArray = append(txInbound.TxArray, txInItem)
+
+			// Add back to array of transaction items
 		}
 	}
-	fmt.Println("transaction Item: ", transactionItem)
+	fmt.Println("transaction txInbound: ", txInbound)
 
 	return nil
 
