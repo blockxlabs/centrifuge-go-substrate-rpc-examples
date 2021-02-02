@@ -410,12 +410,11 @@ func readBlockUsingCentrifuge() error {
 
 	// Go through each Extrinsics
 	for i, ext := range block.Block.Extrinsics {
-		txInItem := TxInItem{}
-		txInItem.BlockHeight = 3443522
-		txInItem.Tx = blockHash.Hex()
-
 		// Match to Batch Transaction
 		if ext.Method.CallIndex.SectionIndex == 16 && ext.Method.CallIndex.MethodIndex == 0 {
+			txInItem := TxInItem{}
+			txInItem.BlockHeight = int64(block.Block.Header.Number)
+			txInItem.Tx = blockHash.Hex()
 			// Decode the batch Transaction Args HERE
 			types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: false})
 
@@ -458,6 +457,8 @@ func readBlockUsingCentrifuge() error {
 						}
 						coin := Coin{DOTAsset, amount}
 						txInItem.Coins = append(txInItem.Coins, coin)
+						// TODO: FEES
+						txInItem.Gas = coin
 					} else if callArg.Type == "Vec<u8>" {
 						var argValue = types.Bytes{}
 						// hex.DecodeString(a.Value.(string))
@@ -469,9 +470,8 @@ func readBlockUsingCentrifuge() error {
 				}
 			}
 			fmt.Println("transaction Item: ", txInItem)
-			txInbound.TxArray = append(txInbound.TxArray, txInItem)
-
 			// Add back to array of transaction items
+			txInbound.TxArray = append(txInbound.TxArray, txInItem)
 		}
 	}
 	fmt.Println("transaction txInbound: ", txInbound)
