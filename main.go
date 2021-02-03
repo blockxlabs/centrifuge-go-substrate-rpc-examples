@@ -389,34 +389,51 @@ func readBlockUsingCentrifuge() error {
 	}
 	api := NewSubstrateAPI()
 	metadata := GetMetadataLatest(api)
+	fmt.Println("BXL: metadata: ")
+
 	types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: true})
+	fmt.Println("BXL: SetSerDeOptions: ")
 
 	/// 0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b
-	blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
+	// blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
+	blockHash, err := api.RPC.Chain.GetBlockHash(31)
 	//Call(result interface{}, method string, args)
 	// api.Client.Call(interface{}, "payment", "extrinsic, at")
 	if err != nil {
 		return err
 	}
+
 	fmt.Println("BXL: readBlockUsingCentrifuge: blockHash: ", blockHash.Hex())
 	// Get the block
 	block, err := api.RPC.Chain.GetBlock(blockHash)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("BXL: readBlockUsingCentrifuge: block: ", block)
+
+	// fmt.Println("BXL: readBlockUsingCentrifuge: block: ", block)
 
 	// GET Transaction Gas price
 
 	// Go through each Extrinsics
 	for i, ext := range block.Block.Extrinsics {
 		// Match to Batch Transaction
-		if ext.Method.CallIndex.SectionIndex == 16 && ext.Method.CallIndex.MethodIndex == 0 {
+		// if ext.Method.CallIndex.SectionIndex == 16 && ext.Method.CallIndex.MethodIndex == 0 {
+		if ext.Method.CallIndex.SectionIndex == 26 && ext.Method.CallIndex.MethodIndex == 0 {
+			// Get payment info
+			var res interface{}
+			err := api.Client.Call(&res, "payment_queryInfo", ext, blockHash.Hex())
+			if err != nil {
+				panic(err)
+			}
+			fmt.Println("BXL:  payment_queryInfon: ", res)
+
+			fmt.Println("BXL:  Batch Transaction: ")
+
 			txInItem := TxInItem{}
 			txInItem.BlockHeight = int64(block.Block.Header.Number)
 			txInItem.Tx = blockHash.Hex()
 			// Decode the batch Transaction Args HERE
-			types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: false})
+			types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: true})
 
 			decoder := scale.NewDecoder(bytes.NewReader(ext.Method.Args))
 
@@ -464,7 +481,7 @@ func readBlockUsingCentrifuge() error {
 						// hex.DecodeString(a.Value.(string))
 						_ = decoder.Decode(&argValue)
 						value := string(argValue)
-						fmt.Println(callArg.Name, " = ", value)
+						fmt.Println("BXL: FetchTxs: Vec<u8> ", callArg.Name, "=", value)
 						txInItem.Memo = value
 					}
 				}
