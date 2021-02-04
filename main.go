@@ -341,7 +341,7 @@ func unmarshalAny(r interface{}, raw interface{}) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(j, r)
+	return json.Unmarshal(j, &r)
 }
 
 func INewUtilityBatchData(BlockHeight int64, Tx string, Memo string, Sender string, To string, Amount *big.Int) *TxInItem {
@@ -381,6 +381,16 @@ func SetWSConnection() {
 	iWspool.SetEndpoint("wss://westend-rpc.polkadot.io")
 }
 
+// DispatchInfo
+type DispatchInfo struct {
+	// Weight of this transaction
+	Weight float64 `json:"weight"`
+	// Class of this transaction
+	Class string `json:"class"`
+	// PaysFee indicates whether this transaction pays fees
+	PartialFee string `json:"partialFee"`
+}
+
 func readBlockUsingCentrifuge() error {
 	txInbound := TxIn{
 		// Chain:    common.DOTChain,
@@ -395,10 +405,10 @@ func readBlockUsingCentrifuge() error {
 	fmt.Println("BXL: SetSerDeOptions: ")
 
 	/// 0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b
-	// blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
-	blockHash, err := api.RPC.Chain.GetBlockHash(31)
-	//Call(result interface{}, method string, args)
-	// api.Client.Call(interface{}, "payment", "extrinsic, at")
+	blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
+	// local testing
+	// blockHash, err := api.RPC.Chain.GetBlockHash(25)
+
 	if err != nil {
 		return err
 	}
@@ -412,28 +422,38 @@ func readBlockUsingCentrifuge() error {
 
 	// fmt.Println("BXL: readBlockUsingCentrifuge: block: ", block)
 
-	// GET Transaction Gas price
-
 	// Go through each Extrinsics
 	for i, ext := range block.Block.Extrinsics {
 		// Match to Batch Transaction
-		// if ext.Method.CallIndex.SectionIndex == 16 && ext.Method.CallIndex.MethodIndex == 0 {
-		if ext.Method.CallIndex.SectionIndex == 26 && ext.Method.CallIndex.MethodIndex == 0 {
+		// WEST-END Section Index
+		if ext.Method.CallIndex.SectionIndex == 16 && ext.Method.CallIndex.MethodIndex == 0 {
+			// Local Section Index
+			// if ext.Method.CallIndex.SectionIndex == 26 && ext.Method.CallIndex.MethodIndex == 0 {
+			fmt.Println("BXL:  Batch Transaction: ")
+
 			// Get payment info
-			var res interface{}
-			err := api.Client.Call(&res, "payment_queryInfo", ext, blockHash.Hex())
+			resInter := DispatchInfo{}
+			// var res interface{}
+			err := api.Client.Call(&resInter, "payment_queryInfo", ext, blockHash.Hex())
 			if err != nil {
 				panic(err)
 			}
-			fmt.Println("BXL:  payment_queryInfon: ", res)
-
-			fmt.Println("BXL:  Batch Transaction: ")
+			fmt.Println("BXL:  payment_queryInfo PartialFee: ", resInter.PartialFee)
+			partialFee := new(big.Int)
+			partialFee, ok := partialFee.SetString(resInter.PartialFee, 10)
+			if !ok {
+				return fmt.Errorf("BXL: failed: unable to set amount string")
+			}
 
 			txInItem := TxInItem{}
+
+			fmt.Println("BXL:  Fee: ", partialFee)
+
+			coin := Coin{DOTAsset, partialFee}
+
+			txInItem.Gas = coin
 			txInItem.BlockHeight = int64(block.Block.Header.Number)
 			txInItem.Tx = blockHash.Hex()
-			// Decode the batch Transaction Args HERE
-			types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: true})
 
 			decoder := scale.NewDecoder(bytes.NewReader(ext.Method.Args))
 
@@ -445,7 +465,7 @@ func readBlockUsingCentrifuge() error {
 			if err != nil {
 				return err
 			}
-			fmt.Println("CALLS # ", i, " --> ", n)
+			fmt.Println("BXL: FetchTxs: calls ", i, "------", n)
 			for call := uint64(0); call < n.Uint64(); call++ {
 				callIndex := types.CallIndex{}
 				err = decoder.Decode(&callIndex)
@@ -453,7 +473,7 @@ func readBlockUsingCentrifuge() error {
 					return err
 				}
 				// how is it determining the call Index?
-				fmt.Println("CALLINDEX # ", i, " --> ", callIndex)
+				fmt.Println("BXL: FetchTxs: callIndex ", i, "------", callIndex)
 				callFunction := findModule(metadata, callIndex)
 				for _, callArg := range callFunction.Args {
 					if callArg.Type == "<T::Lookup as StaticLookup>::Source" {
@@ -474,8 +494,6 @@ func readBlockUsingCentrifuge() error {
 						}
 						coin := Coin{DOTAsset, amount}
 						txInItem.Coins = append(txInItem.Coins, coin)
-						// TODO: FEES
-						txInItem.Gas = coin
 					} else if callArg.Type == "Vec<u8>" {
 						var argValue = types.Bytes{}
 						// hex.DecodeString(a.Value.(string))
