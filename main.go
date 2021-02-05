@@ -405,9 +405,9 @@ func readBlockUsingCentrifuge() error {
 	fmt.Println("BXL: SetSerDeOptions: ")
 
 	/// 0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b
-	blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
+	// blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
 	// local testing
-	// blockHash, err := api.RPC.Chain.GetBlockHash(25)
+	blockHash, err := api.RPC.Chain.GetBlockHash(223)
 
 	if err != nil {
 		return err
@@ -674,10 +674,29 @@ func transferAliceSr25519ToAliceEd25519() {
 	}
 	call := CreateBalanceCall(metadata, aliceEd25519, 10)
 	ext := types.NewExtrinsic(call)
-	err := ext.Sign(signature.TestKeyringPairAlice, options)
+
+	blockHash, err := api.RPC.Chain.GetFinalizedHead()
 	if err != nil {
 		panic(err)
 	}
+
+	err = ext.Sign(signature.TestKeyringPairAlice, options)
+	if err != nil {
+		panic(err)
+	}
+
+	resInter := DispatchInfo{}
+	err = api.Client.Call(&resInter, "payment_queryInfo", ext, blockHash.Hex())
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("BXL:  payment_queryInfo PartialFee: ", resInter.PartialFee)
+	partialFee := new(big.Int)
+	partialFee, ok := partialFee.SetString(resInter.PartialFee, 10)
+	if !ok {
+		fmt.Println("BXL: ERROR: unable to set amount string")
+	}
+
 	hash, err := api.RPC.Author.SubmitExtrinsic(ext)
 	if err != nil {
 		fmt.Println(err.Error())
