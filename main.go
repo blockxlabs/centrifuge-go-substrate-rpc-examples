@@ -405,12 +405,29 @@ func readBlockUsingCentrifuge() error {
 	fmt.Println("BXL: SetSerDeOptions: ")
 
 	/// 0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b
-	// blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
+	blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
 	// local testing
-	blockHash, err := api.RPC.Chain.GetBlockHash(223)
-
+	// blockHash, err := api.RPC.Chain.GetBlockHash(223)
 	if err != nil {
 		return err
+	}
+
+	key, err := types.CreateStorageKey(metadata, "System", "Events", nil, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	raw, err := api.RPC.State.GetStorageRaw(key, blockHash)
+	if err != nil {
+		panic(err)
+	}
+
+	//fmt.Printf("%x\n", *raw)
+
+	events := types.EventRecords{}
+	err = types.EventRecordsRaw(*raw).DecodeEventRecords(metadata, &events)
+	if err != nil {
+		panic(err)
 	}
 
 	fmt.Println("BXL: readBlockUsingCentrifuge: blockHash: ", blockHash.Hex())
@@ -420,6 +437,8 @@ func readBlockUsingCentrifuge() error {
 		panic(err)
 	}
 
+	fmt.Println("BXL: readBlockUsingCentrifuge: events: ", events)
+
 	// fmt.Println("BXL: readBlockUsingCentrifuge: block: ", block)
 
 	// Go through each Extrinsics
@@ -427,86 +446,97 @@ func readBlockUsingCentrifuge() error {
 		// Match to Batch Transaction
 		// WEST-END Section Index
 		if ext.Method.CallIndex.SectionIndex == 16 && ext.Method.CallIndex.MethodIndex == 0 {
-			// Local Section Index
-			// if ext.Method.CallIndex.SectionIndex == 26 && ext.Method.CallIndex.MethodIndex == 0 {
-			fmt.Println("BXL:  Batch Transaction: ")
 
-			// Get payment info
-			resInter := DispatchInfo{}
-			// var res interface{}
-			err := api.Client.Call(&resInter, "payment_queryInfo", ext, blockHash.Hex())
-			if err != nil {
-				panic(err)
-			}
-			fmt.Println("BXL:  payment_queryInfo PartialFee: ", resInter.PartialFee)
-			partialFee := new(big.Int)
-			partialFee, ok := partialFee.SetString(resInter.PartialFee, 10)
-			if !ok {
-				return fmt.Errorf("BXL: failed: unable to set amount string")
-			}
+			for _, event := range events.Utility_BatchCompleted {
+				if int(event.Phase.AsApplyExtrinsic) == i { // Match Utility_BatchCompleted with extrinsic
+					fmt.Println("BXL readBlockUsingCentrifuge: Phase.AsApplyExtrinsic event: ", event)
+					// Local Section Index
+					// if ext.Method.CallIndex.SectionIndex == 26 && ext.Method.CallIndex.MethodIndex == 0 {
+					fmt.Println("BXL:  Batch Transaction: ")
 
-			txInItem := TxInItem{}
-
-			fmt.Println("BXL:  Fee: ", partialFee)
-
-			coin := Coin{DOTAsset, partialFee}
-
-			txInItem.Gas = coin
-			txInItem.BlockHeight = int64(block.Block.Header.Number)
-			txInItem.Tx = blockHash.Hex()
-
-			decoder := scale.NewDecoder(bytes.NewReader(ext.Method.Args))
-
-			sender, _ := subkey.SS58Address(ext.Signature.Signer.AsAccountID[:], uint8(42))
-			fmt.Println("BXL: sender: ", sender)
-			txInItem.Sender = sender
-			// determine number of calls
-			n, err := decoder.DecodeUintCompact()
-			if err != nil {
-				return err
-			}
-			fmt.Println("BXL: FetchTxs: calls ", i, "------", n)
-			for call := uint64(0); call < n.Uint64(); call++ {
-				callIndex := types.CallIndex{}
-				err = decoder.Decode(&callIndex)
-				if err != nil {
-					return err
-				}
-				// how is it determining the call Index?
-				fmt.Println("BXL: FetchTxs: callIndex ", i, "------", callIndex)
-				callFunction := findModule(metadata, callIndex)
-				for _, callArg := range callFunction.Args {
-					if callArg.Type == "<T::Lookup as StaticLookup>::Source" {
-						var argValue = types.AccountID{}
-						_ = decoder.Decode(&argValue)
-						ss58, _ := subkey.SS58Address(argValue[:], uint8(42))
-						fmt.Println(callArg.Name, " = ", ss58)
-						txInItem.To = ss58
-					} else if callArg.Type == "Compact<T::Balance>" {
-						var argValue = types.UCompact{}
-						_ = decoder.Decode(&argValue)
-						fmt.Println(callArg.Name, " = ", argValue)
-						argValueBigInt := big.Int(argValue)
-						amount := new(big.Int)
-						amount, ok := amount.SetString(argValueBigInt.String(), 10)
-						if !ok {
-							return fmt.Errorf("BXL: failed: unable to set amount string")
-						}
-						coin := Coin{DOTAsset, amount}
-						txInItem.Coins = append(txInItem.Coins, coin)
-					} else if callArg.Type == "Vec<u8>" {
-						var argValue = types.Bytes{}
-						// hex.DecodeString(a.Value.(string))
-						_ = decoder.Decode(&argValue)
-						value := string(argValue)
-						fmt.Println("BXL: FetchTxs: Vec<u8> ", callArg.Name, "=", value)
-						txInItem.Memo = value
+					// Get payment info
+					resInter := DispatchInfo{}
+					// var res interface{}
+					err := api.Client.Call(&resInter, "payment_queryInfo", ext, blockHash.Hex())
+					if err != nil {
+						panic(err)
 					}
+					fmt.Println("BXL:  payment_queryInfo PartialFee: ", resInter.PartialFee)
+					partialFee := new(big.Int)
+					partialFee, ok := partialFee.SetString(resInter.PartialFee, 10)
+					if !ok {
+						return fmt.Errorf("BXL: failed: unable to set amount string")
+					}
+
+					txInItem := TxInItem{}
+
+					fmt.Println("BXL:  Fee: ", partialFee)
+
+					coin := Coin{DOTAsset, partialFee}
+
+					txInItem.Gas = coin
+					txInItem.BlockHeight = int64(block.Block.Header.Number)
+					txInItem.Tx = blockHash.Hex()
+
+					decoder := scale.NewDecoder(bytes.NewReader(ext.Method.Args))
+					accountID := ext.Signature.Signer.AsAccountID[:]
+					// accountID = append(accountID, 33) KgJWmpw2Q3DUUYiALUooXSPMVcPba5dSZHxmZSz7TAHM8JJoL
+					sender, err := subkey.SS58Address(accountID, uint8(42))
+					if err != nil {
+						return err
+					}
+					// sender, _ := subkey.SS58Address(ext.Signature.Signer.AsAccountID[:], uint8(42))
+					fmt.Println("BXL: sender: ", sender)
+					txInItem.Sender = sender
+					// determine number of calls
+					n, err := decoder.DecodeUintCompact()
+					if err != nil {
+						return err
+					}
+					fmt.Println("BXL: FetchTxs: calls ", i, "------", n)
+					for call := uint64(0); call < n.Uint64(); call++ {
+						callIndex := types.CallIndex{}
+						err = decoder.Decode(&callIndex)
+						if err != nil {
+							return err
+						}
+						// how is it determining the call Index?
+						fmt.Println("BXL: FetchTxs: callIndex ", i, "------", callIndex)
+						callFunction := findModule(metadata, callIndex)
+						for _, callArg := range callFunction.Args {
+							if callArg.Type == "<T::Lookup as StaticLookup>::Source" {
+								var argValue = types.AccountID{}
+								_ = decoder.Decode(&argValue)
+								ss58, _ := subkey.SS58Address(argValue[:], uint8(42))
+								fmt.Println(callArg.Name, " = ", ss58)
+								txInItem.To = ss58
+							} else if callArg.Type == "Compact<T::Balance>" {
+								var argValue = types.UCompact{}
+								_ = decoder.Decode(&argValue)
+								fmt.Println(callArg.Name, " = ", argValue)
+								argValueBigInt := big.Int(argValue)
+								amount := new(big.Int)
+								amount, ok := amount.SetString(argValueBigInt.String(), 10)
+								if !ok {
+									return fmt.Errorf("BXL: failed: unable to set amount string")
+								}
+								coin := Coin{DOTAsset, amount}
+								txInItem.Coins = append(txInItem.Coins, coin)
+							} else if callArg.Type == "Vec<u8>" {
+								var argValue = types.Bytes{}
+								// hex.DecodeString(a.Value.(string))
+								_ = decoder.Decode(&argValue)
+								value := string(argValue)
+								fmt.Println("BXL: FetchTxs: Vec<u8> ", callArg.Name, "=", value)
+								txInItem.Memo = value
+							}
+						}
+					}
+					fmt.Println("transaction Item: ", txInItem)
+					// Add back to array of transaction items
+					txInbound.TxArray = append(txInbound.TxArray, txInItem)
 				}
 			}
-			fmt.Println("transaction Item: ", txInItem)
-			// Add back to array of transaction items
-			txInbound.TxArray = append(txInbound.TxArray, txInItem)
 		}
 	}
 	fmt.Println("transaction txInbound: ", txInbound)
