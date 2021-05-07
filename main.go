@@ -12,19 +12,21 @@ import (
 	"strings"
 
 	"github.com/JFJun/go-substrate-crypto/ss58"
-	gsrpc "github.com/centrifuge/go-substrate-rpc-client/v2"
-	"github.com/centrifuge/go-substrate-rpc-client/v2/config"
-	"github.com/centrifuge/go-substrate-rpc-client/v2/scale"
-	"github.com/centrifuge/go-substrate-rpc-client/v2/signature"
-	"github.com/centrifuge/go-substrate-rpc-client/v2/types"
+	gsrpc "github.com/centrifuge/go-substrate-rpc-client/v3"
+	"github.com/centrifuge/go-substrate-rpc-client/v3/config"
+	"github.com/centrifuge/go-substrate-rpc-client/v3/signature"
+	"github.com/centrifuge/go-substrate-rpc-client/v3/types"
 	"github.com/minio/blake2b-simd"
 	"github.com/vedhavyas/go-subkey"
+	"github.com/vedhavyas/go-subkey/scale"
 
-	// gsrpc "github.com/centrifuge/go-substrate-rpc-client"
-	// "github.com/centrifuge/go-substrate-rpc-client/config"
-	// "github.com/centrifuge/go-substrate-rpc-client/scale"
-	// "github.com/centrifuge/go-substrate-rpc-client/signature"
-	// "github.com/centrifuge/go-substrate-rpc-client/types"
+	// "github.com/vedhavyas/go-subkey/scale"
+
+	// gsrpc "github.com/centrifuge/go-substrate-rpc-client/v2"
+	// "github.com/centrifuge/go-substrate-rpc-client/v2/config"
+	// "github.com/centrifuge/go-substrate-rpc-client/v2/signature"
+	// "github.com/centrifuge/go-substrate-rpc-client/v2/types"
+	// "github.com/minio/blake2b-simd"
 
 	iScale "github.com/itering/scale.go"
 	iTypes "github.com/itering/scale.go/types"
@@ -53,6 +55,9 @@ func main() {
 	// GetAddress(pk)
 	// Read Block Using Centrifuge
 	readBlockUsingCentrifuge()
+
+	// Read Block Using Centrifuge Using Events
+	// readBlockUsingCentrifugeEvents()
 
 	// read block using Itering
 	// readBlockUsingItering()
@@ -254,7 +259,7 @@ type TxIn struct {
 	TxArray              []TxInItem `json:"txArray"`
 	Filtered             bool       `json:"filtered"`
 	MemPool              bool       `json:"mem_pool"`          // indicate whether this item is in the mempool or not
-	SentUnFinalised      bool       `json:"sent_un_finalised"` // indicate whehter unfinalised tx had been sent to THORChain
+	SentUnFinalised      bool       `json:"sent_un_finalised"` // indicate whehter unfinalised tx had been sent
 	Finalised            bool       `json:"finalised"`
 	ConfirmationRequired int64      `json:"confirmation_required"`
 }
@@ -391,6 +396,15 @@ type DispatchInfo struct {
 	PartialFee string `json:"partialFee"`
 }
 
+type FeeDetails struct {
+	InclusionFee InclusionFee
+}
+type InclusionFee struct {
+	AdjustedWeightFee string `json:"adjustedWeightFee"`
+	BaseFee           string `json:"baseFee"`
+	LenFee            string `json:"lenFee"`
+}
+
 func readBlockUsingCentrifuge() error {
 	txInbound := TxIn{
 		// Chain:    common.DOTChain,
@@ -399,22 +413,181 @@ func readBlockUsingCentrifuge() error {
 	}
 	api := NewSubstrateAPI()
 	metadata := GetMetadataLatest(api)
-	fmt.Println("BXL: metadata: ")
+	// fmt.Println("BXL: metadata: ", metadata)
 
 	types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: true})
 	fmt.Println("BXL: SetSerDeOptions: ")
 
+	// key, err := types.CreateStorageKey(metadata, "System", "Events", nil, nil)
+	// if err != nil {
+	// 	panic(err)
+	// }
+
 	/// 0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b
-	blockHash, err := api.RPC.Chain.GetBlockHash(3443522)
-	// local testing
-	// blockHash, err := api.RPC.Chain.GetBlockHash(223)
+	// blockNumber 3443522 westend testing (Doesn't work in v3)
+
+	// https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fwestend-rpc.polkadot.io#/explorer/query/0xbcd5ea39cbd7aeda3623c182617cbb7a24b77af016dd82d2a71592d33a11264d
+	blockHash, err := api.RPC.Chain.GetBlockHash(5482576)
+	// blockNumber := uint64(4731) // local testing
+	// blockHash, err := api.RPC.Chain.GetBlockHash(blockNumber)
+
+	// blockHash, err := api.RPC.Chain.GetBlockHashLatest()
 	if err != nil {
 		return err
 	}
 
+	// raw, err := api.RPC.State.GetStorageRaw(key, blockHash)
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// fmt.Printf("BXL: RAW EVENT: %x\n", *raw)
+
+	// events := types.EventRecords{}
+	// err = types.EventRecordsRaw(*raw).DecodeEventRecords(metadata, &events)
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// fmt.Println("BXL: readBlockUsingCentrifuge: blockHash: ", blockHash.Hex())
+	// Get the block
+	block, err := api.RPC.Chain.GetBlock(blockHash)
+	if err != nil {
+		panic(err)
+	}
+
+	// fmt.Println("BXL: readBlockUsingCentrifuge: events: ", events)
+
+	fmt.Println("BXL: readBlockUsingCentrifuge: block: ", block)
+
+	// Go through each Extrinsics
+	for i, ext := range block.Block.Extrinsics {
+		// Match to Batch Transaction
+		// WEST-END Section Index
+		if ext.Method.CallIndex.SectionIndex == 16 && ext.Method.CallIndex.MethodIndex == 0 {
+			// Local Section Index
+			// if ext.Method.CallIndex.SectionIndex == 26 && ext.Method.CallIndex.MethodIndex == 0 {
+			fmt.Println("BXL:  Batch Transaction: ")
+
+			// Get payment info
+			// resInter := DispatchInfo{}
+			// var res interface{}
+			// err := api.Client.Call(&resInter, "payment_queryInfo", ext, blockHash.Hex())
+			// if err != nil {
+			// 	panic(err)
+			// }
+			// fmt.Println("BXL:  payment_queryInfo PartialFee: ", resInter.PartialFee)
+			// partialFee := new(big.Int)
+			// partialFee, ok := partialFee.SetString(resInter.PartialFee, 10)
+			// if !ok {
+			// 	return fmt.Errorf("BXL: failed: unable to set amount string")
+			// }
+
+			txInItem := TxInItem{}
+
+			// fmt.Println("BXL:  Fee: ", partialFee)
+
+			// coin := Coin{DOTAsset, partialFee}
+
+			// txInItem.Gas = coin
+			// txInItem.BlockHeight = int64(block.Block.Header.Number)
+			// txInItem.Tx = blockHash.Hex()
+
+			sender, _ := subkey.SS58Address(ext.Signature.Signer.AsID[:], uint8(42))
+			fmt.Println("BXL: sender: ", sender)
+			txInItem.Sender = sender
+
+			decoder := scale.NewDecoder(bytes.NewReader(ext.Method.Args))
+			fmt.Println("BXL: ext.Method.Args: ", ext.Method.Args)
+
+			// determine number of calls
+			n, err := decoder.DecodeUintCompact()
+			if err != nil {
+				return err
+			}
+			fmt.Println("BXL: FetchTxs: calls ", i, "------", n)
+			for call := uint64(0); call < n.Uint64(); call++ {
+				callIndex := types.CallIndex{}
+				err = decoder.Decode(&callIndex)
+				if err != nil {
+					return err
+				}
+				// how is it determining the call Index?
+				fmt.Println("BXL: FetchTxs: callIndex ", i, "------", callIndex)
+				callFunction := findModule(metadata, callIndex)
+				for _, callArg := range callFunction.Args {
+					if callArg.Type == "<T::Lookup as StaticLookup>::Source" {
+						var argValue = types.AccountID{}
+						_ = decoder.Decode(&argValue)
+						ss58, _ := subkey.SS58Address(argValue[:], uint8(42))
+						fmt.Println(callArg.Name, " = ", ss58)
+						txInItem.To = ss58
+					} else if callArg.Type == "Compact<T::Balance>" {
+						var argValuea = types.U128{}
+						// var argValue interface{}
+						err = decoder.Decode(&argValuea)
+						if err != nil {
+							panic(err)
+						}
+						fmt.Println(callArg.Name, " = ", argValuea)
+						// argValueBigInt := big.Int(argValue)
+						// amount := new(big.Int)
+						// amount, ok := amount.SetString(argValueBigInt.String(), 10)
+						// if !ok {
+						// 	return fmt.Errorf("BXL: failed: unable to set amount string")
+						// }
+						// coin := Coin{DOTAsset, amount}
+						// txInItem.Coins = append(txInItem.Coins, coin)
+					} else if callArg.Type == "Vec<u8>" {
+						var argValue = types.Bytes{}
+						// hex.DecodeString(a.Value.(string))
+						_ = decoder.Decode(&argValue)
+						value := string(argValue)
+						fmt.Println("BXL: FetchTxs: Vec<u8> ", callArg.Name, "=", value)
+						txInItem.Memo = value
+					}
+				}
+			}
+			fmt.Println("transaction Item: ", txInItem)
+			// Add back to array of transaction items
+			txInbound.TxArray = append(txInbound.TxArray, txInItem)
+		}
+	}
+
+	fmt.Println("transaction txInbound: ", txInbound)
+
+	return nil
+}
+
+func readBlockUsingCentrifugeEvents() error {
+	txInbound := TxIn{
+		// Chain:    common.DOTChain,
+		Filtered: false,
+		MemPool:  false,
+	}
+	api := NewSubstrateAPI()
+	metadata := GetMetadataLatest(api)
+	// fmt.Println("BXL: metadata: ", metadata)
+
+	types.SetSerDeOptions(types.SerDeOptions{NoPalletIndices: true})
+	fmt.Println("BXL: SetSerDeOptions: ")
+
 	key, err := types.CreateStorageKey(metadata, "System", "Events", nil, nil)
 	if err != nil {
 		panic(err)
+	}
+
+	/// 0x39718cb67ed41fb088ecfa3b7e5fe775d6b4867b38f67bc5be291b36ede18d8b
+	// blockNumber 3443522 westend testing (Doesn't work in v3)
+
+	// https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Fwestend-rpc.polkadot.io#/explorer/query/0xbcd5ea39cbd7aeda3623c182617cbb7a24b77af016dd82d2a71592d33a11264d
+	blockHash, err := api.RPC.Chain.GetBlockHash(5482576)
+	// blockNumber := uint64(4731) // local testing
+	// blockHash, err := api.RPC.Chain.GetBlockHash(blockNumber)
+
+	// blockHash, err := api.RPC.Chain.GetBlockHashLatest()
+	if err != nil {
+		return err
 	}
 
 	raw, err := api.RPC.State.GetStorageRaw(key, blockHash)
@@ -422,7 +595,7 @@ func readBlockUsingCentrifuge() error {
 		panic(err)
 	}
 
-	//fmt.Printf("%x\n", *raw)
+	fmt.Printf("BXL: RAW EVENT: %x\n", *raw)
 
 	events := types.EventRecords{}
 	err = types.EventRecordsRaw(*raw).DecodeEventRecords(metadata, &events)
@@ -439,26 +612,84 @@ func readBlockUsingCentrifuge() error {
 
 	// fmt.Println("BXL: readBlockUsingCentrifuge: events: ", events)
 
-	// fmt.Println("BXL: readBlockUsingCentrifuge: block: ", block)
-
-	// Loop through successful batch utility events
+	fmt.Println("BXL: readBlockUsingCentrifuge: block: ", block)
+	// Loop through successful utility batch events
 	for _, event := range events.Utility_BatchCompleted {
+		// for _, event := range events.System_ExtrinsicSuccess {
 		// Get the Extrinsic
 		ext := block.Block.Extrinsics[int(event.Phase.AsApplyExtrinsic)]
-		fmt.Println("BXL:  Batch Transaction: ext: ", ext)
-		// Get payment info
-		resInter := DispatchInfo{}
-		// var res interface{}
-		err := api.Client.Call(&resInter, "payment_queryInfo", ext, blockHash.Hex())
+		enc, _ := types.EncodeToHexString(ext)
+		// fmt.Println("BXL:  Batch Transaction: ext: ", ext)
+		fmt.Println("BXL:  Batch Transaction: enc: ", enc)
+
+		resInter := FeeDetails{}
+		// var resInter interface{}
+
+		err := api.Client.Call(&resInter, "payment_queryFeeDetails", ext, blockHash.Hex())
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println("BXL:  payment_queryInfo PartialFee: ", resInter.PartialFee)
-		partialFee := new(big.Int)
-		partialFee, ok := partialFee.SetString(resInter.PartialFee, 10)
-		if !ok {
-			return fmt.Errorf("BXL: failed: unable to set amount string")
+
+		// Get payment info
+		resInterDispatchInfo := DispatchInfo{}
+		err_qi := api.Client.Call(&resInterDispatchInfo, "payment_queryInfo", ext, blockHash.Hex())
+		if err_qi != nil {
+			panic(err_qi)
 		}
+		fmt.Println("BXL:  payment_queryInfo PartialFee: ", resInterDispatchInfo.PartialFee)
+
+		partialFee := new(big.Int)
+		// partialFee, ok := partialFee.SetString(resInter.PartialFee, 10)
+		// if !ok {
+		// 	return fmt.Errorf("BXL: failed: unable to set amount string")
+		// }
+
+		// Get the feeRates to post network fee
+		adjustedWeightFee := new(big.Int)
+		adjustedWeightFeeStrConv, err := strconv.ParseInt(hexaNumberToInteger(resInter.InclusionFee.AdjustedWeightFee), 16, 64)
+		if err != nil {
+			panic(err)
+		}
+		adjustedWeightFee = adjustedWeightFee.SetInt64(adjustedWeightFeeStrConv)
+		fmt.Println("BXL:  adjustedWeightFee: ", adjustedWeightFee)
+
+		baseFee := new(big.Int)
+		baseFeeStrConv, err := strconv.ParseInt(hexaNumberToInteger(resInter.InclusionFee.BaseFee), 16, 64)
+		if err != nil {
+			panic(err)
+		}
+		baseFee = baseFee.SetInt64(baseFeeStrConv)
+		fmt.Println("BXL:  baseFee: ", baseFee)
+
+		lenFee := new(big.Int)
+		lenFeeStrConv, err := strconv.ParseInt(hexaNumberToInteger(resInter.InclusionFee.LenFee), 16, 64)
+		if err != nil {
+			panic(err)
+		}
+		lenFee = lenFee.SetInt64(lenFeeStrConv)
+		fmt.Println("BXL:  lenFee: ", lenFee)
+
+		partialFeeCal := new(big.Int)
+		partialFeeCal = partialFeeCal.Add(baseFee, lenFee)
+		partialFeeCal = partialFeeCal.Add(partialFeeCal, adjustedWeightFee)
+		fmt.Println("BXL:  partialFeeCal: ", partialFeeCal)
+
+		feeRateCal := new(big.Int)
+
+		// Polkadot Fees
+		// 1 calculate amount of DOT consumed as fees in that block (PartialFee = lenFee + baseFee + adjustedWeight)
+		// 2 calculated block size (lenFee)
+		// 3 feeRate is (1)/(2) (baseFee + adjustedWeight)
+		feeRateCal = feeRateCal.Add(baseFee, adjustedWeightFee)
+		fmt.Println("BXL:  feeRateCal: ", feeRateCal)
+
+		gasPriceForT := new(big.Int)
+		// Polkadot is 10 decimal precision
+		tc := big.NewInt(100)
+		gasPriceForT = gasPriceForT.Div(feeRateCal, tc)
+		// Do we need to worry about the lost accuracy?
+		gasValue := gasPriceForT
+		fmt.Println("BXL:  t gasValue: ", gasValue)
 
 		txInItem := TxInItem{}
 		fmt.Println("BXL:  txInItem: ", txInItem)
@@ -471,13 +702,16 @@ func readBlockUsingCentrifuge() error {
 		txInItem.Tx = blockHash.Hex()
 
 		decoder := scale.NewDecoder(bytes.NewReader(ext.Method.Args))
-		accountID := ext.Signature.Signer.AsAccountID[:]
+		fmt.Println("BXL: Method.Args: ", ext.Method.Args)
+		accountID := ext.Signature.Signer.AsID
+		fmt.Println("BXL: accountID: ", accountID)
+
 		// accountID = append(accountID, 33) KgJWmpw2Q3DUUYiALUooXSPMVcPba5dSZHxmZSz7TAHM8JJoL
-		sender, err := subkey.SS58Address(accountID, uint8(42))
-		if err != nil {
-			return err
-		}
-		// sender, _ := subkey.SS58Address(ext.Signature.Signer.AsAccountID[:], uint8(42))
+		// sender, err := subkey.SS58Address(accountID, uint8(42))
+		// if err != nil {
+		// 	return err
+		// }
+		sender, _ := subkey.SS58Address(ext.Signature.Signer.AsID[:], uint8(42))
 		fmt.Println("BXL: sender: ", sender)
 		txInItem.Sender = sender
 		// determine number of calls
@@ -487,10 +721,13 @@ func readBlockUsingCentrifuge() error {
 		}
 		// fmt.Println("BXL: FetchTxs: calls ", i, "------", n)
 		for call := uint64(0); call < n.Uint64(); call++ {
+
 			callIndex := types.CallIndex{}
 			err = decoder.Decode(&callIndex)
 			if err != nil {
-				return err
+				fmt.Println("decoder Error", " = ", err)
+
+				// return err
 			}
 			// how is it determining the call Index?
 			// fmt.Println("BXL: FetchTxs: callIndex ", i, "------", callIndex)
@@ -499,21 +736,22 @@ func readBlockUsingCentrifuge() error {
 				if callArg.Type == "<T::Lookup as StaticLookup>::Source" {
 					var argValue = types.AccountID{}
 					_ = decoder.Decode(&argValue)
+					// https://github.com/paritytech/substrate/blob/master/ss58-registry.json
 					ss58, _ := subkey.SS58Address(argValue[:], uint8(42))
 					fmt.Println(callArg.Name, " = ", ss58)
 					txInItem.To = ss58
 				} else if callArg.Type == "Compact<T::Balance>" {
-					var argValue = types.UCompact{}
+					var argValue = types.U128{}
 					_ = decoder.Decode(&argValue)
 					fmt.Println(callArg.Name, " = ", argValue)
-					argValueBigInt := big.Int(argValue)
-					amount := new(big.Int)
-					amount, ok := amount.SetString(argValueBigInt.String(), 10)
-					if !ok {
-						return fmt.Errorf("BXL: failed: unable to set amount string")
-					}
-					coin := Coin{DOTAsset, amount}
-					txInItem.Coins = append(txInItem.Coins, coin)
+					// argValueBigInt := big.Int(argValue)
+					// amount := new(big.Int)
+					// amount, ok := amount.SetString(argValue.String(), 10)
+					// if !ok {
+					// 	return fmt.Errorf("BXL: failed: unable to set amount string")
+					// }
+					// coin := Coin{DOTAsset, amount}
+					// txInItem.Coins = append(txInItem.Coins, coin)
 				} else if callArg.Type == "Vec<u8>" {
 					var argValue = types.Bytes{}
 					// hex.DecodeString(a.Value.(string))
@@ -521,6 +759,11 @@ func readBlockUsingCentrifuge() error {
 					value := string(argValue)
 					fmt.Println("BXL: FetchTxs: Vec<u8> ", callArg.Name, "=", value)
 					txInItem.Memo = value
+				} else {
+					var argValue = types.Bytes{}
+					_ = decoder.Decode(&argValue)
+					fmt.Println("BXL: FetchTxs: UNKNOWN argValue", callArg.Name, "=", argValue)
+
 				}
 			}
 		}
@@ -528,19 +771,26 @@ func readBlockUsingCentrifuge() error {
 		// Add back to array of transaction items
 		txInbound.TxArray = append(txInbound.TxArray, txInItem)
 	}
+
 	fmt.Println("transaction txInbound: ", txInbound)
-
 	return nil
-
 }
 
 func findModule(metadata *types.Metadata, index types.CallIndex) types.FunctionMetadataV4 {
-	for _, mod := range metadata.AsMetadataV12.Modules {
-		if mod.Index == index.SectionIndex {
-			fmt.Println("Find module  ", mod.Name)
-			return mod.Calls[index.MethodIndex]
+	if metadata.IsMetadataV12 {
+		for _, mod := range metadata.AsMetadataV12.Modules {
+			if mod.Index == index.SectionIndex {
+				// if mod.Name == "Staking" {
+				// 	fmt.Println("This should be System  ", mod.Name)
+				// 	modSystem := metadata.AsMetadataV12.Modules[0]
+				// 	return modSystem.Calls[1]
+				// }
+				fmt.Println("Find module  ", mod.Name)
+				return mod.Calls[index.MethodIndex]
+			}
 		}
 	}
+
 	panic("Unknown call")
 }
 
@@ -765,126 +1015,126 @@ func transferAliceSr25519ToAliceEcdsa() {
 	fmt.Printf("Transfer sent with extrinsic hash %#x\n", hash)
 }
 
-func transferAliceEcdsaToBobSr25519() {
-	api := NewSubstrateAPI()
-	SetSerDeOptions()
-	metadata := GetMetadataLatest(api)
-	genesisHash := GetGenesisHash(api)
-	runtimeVersion := GetRuntimeVersionLatest(api)
+// func transferAliceEcdsaToBobSr25519() {
+// 	api := NewSubstrateAPI()
+// 	SetSerDeOptions()
+// 	metadata := GetMetadataLatest(api)
+// 	genesisHash := GetGenesisHash(api)
+// 	runtimeVersion := GetRuntimeVersionLatest(api)
 
-	aliceEcdsaKeyringPair := GetAliceEcdsaKeyringPair()
-	storageKey := CreateStorageKey(metadata, aliceEcdsaKeyringPair.AccountID)
-	accountInfo := GetStorageLatest(api, storageKey)
-	nonce := uint32(accountInfo.Nonce)
+// 	aliceEcdsaKeyringPair := GetAliceEcdsaKeyringPair()
+// 	storageKey := CreateStorageKey(metadata, aliceEcdsaKeyringPair.AccountID)
+// 	accountInfo := GetStorageLatest(api, storageKey)
+// 	nonce := uint32(accountInfo.Nonce)
 
-	// $ subkey inspect //Bob
-	// Secret Key URI `//Bob` is account:
-	// Secret seed:      0x398f0c28f98885e046333d4a41c19cee4c37368a9832c6502f6cfd182e2aef89
-	// Public key (hex): 0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48
-	// Account ID:       0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48
-	// SS58 Address:     5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty
-	bobSr25519 := NewAddressFromHexAccountID("0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48")
+// 	// $ subkey inspect //Bob
+// 	// Secret Key URI `//Bob` is account:
+// 	// Secret seed:      0x398f0c28f98885e046333d4a41c19cee4c37368a9832c6502f6cfd182e2aef89
+// 	// Public key (hex): 0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48
+// 	// Account ID:       0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48
+// 	// SS58 Address:     5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty
+// 	bobSr25519 := NewAddressFromHexAccountID("0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48")
 
-	options := types.SignatureOptions{
-		BlockHash:          genesisHash,
-		Era:                types.ExtrinsicEra{IsMortalEra: false},
-		GenesisHash:        genesisHash,
-		Nonce:              types.NewUCompactFromUInt(uint64(nonce)),
-		SpecVersion:        runtimeVersion.SpecVersion,
-		Tip:                types.NewUCompactFromUInt(0),
-		TransactionVersion: runtimeVersion.TransactionVersion,
-	}
+// 	options := types.SignatureOptions{
+// 		BlockHash:          genesisHash,
+// 		Era:                types.ExtrinsicEra{IsMortalEra: false},
+// 		GenesisHash:        genesisHash,
+// 		Nonce:              types.NewUCompactFromUInt(uint64(nonce)),
+// 		SpecVersion:        runtimeVersion.SpecVersion,
+// 		Tip:                types.NewUCompactFromUInt(0),
+// 		TransactionVersion: runtimeVersion.TransactionVersion,
+// 	}
 
-	call := CreateBalanceCall(metadata, bobSr25519, 10)
-	ext := types.NewExtrinsic(call)
+// 	call := CreateBalanceCall(metadata, bobSr25519, 10)
+// 	ext := types.NewExtrinsic(call)
 
-	// subkey inspect --scheme Ecdsa //Alice
-	// Secret Key URI `//Alice` is account:
-	//   Secret seed:      0xcb6df9de1efca7a3998a8ead4e02159d5fa99c3e0d4fd6432667390bb4726854
-	//   Public key (hex): 0x020a1091341fe5664bfa1782d5e04779689068c916b04cb365ec3153755684d9a1
-	//   Account ID:       0x01e552298e47454041ea31273b4b630c64c104e4514aa3643490b8aaca9cf8ed
-	//   SS58 Address:     5C7C2Z5sWbytvHpuLTvzKunnnRwQxft1jiqrLD5rhucQ5S9X
-	// sign using ecdsa
+// 	// subkey inspect --scheme Ecdsa //Alice
+// 	// Secret Key URI `//Alice` is account:
+// 	//   Secret seed:      0xcb6df9de1efca7a3998a8ead4e02159d5fa99c3e0d4fd6432667390bb4726854
+// 	//   Public key (hex): 0x020a1091341fe5664bfa1782d5e04779689068c916b04cb365ec3153755684d9a1
+// 	//   Account ID:       0x01e552298e47454041ea31273b4b630c64c104e4514aa3643490b8aaca9cf8ed
+// 	//   SS58 Address:     5C7C2Z5sWbytvHpuLTvzKunnnRwQxft1jiqrLD5rhucQ5S9X
+// 	// sign using ecdsa
 
-	extSigned, err := SignUsingEcdsa(ext, aliceEcdsaKeyringPair, options)
-	if err != nil {
-		panic(err)
-	}
+// 	extSigned, err := SignUsingEcdsa(ext, aliceEcdsaKeyringPair, options)
+// 	if err != nil {
+// 		panic(err)
+// 	}
 
-	hash, err := api.RPC.Author.SubmitExtrinsic(extSigned)
-	if err != nil {
-		fmt.Println(err.Error())
-		panic(err)
-	}
-	fmt.Printf("Transfer sent with extrinsic hash %#x\n", hash)
-}
+// 	hash, err := api.RPC.Author.SubmitExtrinsic(extSigned)
+// 	if err != nil {
+// 		fmt.Println(err.Error())
+// 		panic(err)
+// 	}
+// 	fmt.Printf("Transfer sent with extrinsic hash %#x\n", hash)
+// }
 
 // Sign Using Ecdsa
-func SignUsingEcdsa(e types.Extrinsic, signer EcdsaKeyringPair, o types.SignatureOptions) (types.Extrinsic, error) {
-	if e.Type() != types.ExtrinsicVersion4 {
-		return e, fmt.Errorf("unsupported extrinsic version: %v (isSigned: %v, type: %v)", e.Version, e.IsSigned(), e.Type())
-	}
+// func SignUsingEcdsa(e types.Extrinsic, signer EcdsaKeyringPair, o types.SignatureOptions) (types.Extrinsic, error) {
+// 	if e.Type() != types.ExtrinsicVersion4 {
+// 		return e, fmt.Errorf("unsupported extrinsic version: %v (isSigned: %v, type: %v)", e.Version, e.IsSigned(), e.Type())
+// 	}
 
-	mb, err := types.EncodeToBytes(e.Method)
-	if err != nil {
-		return e, err
-	}
+// 	mb, err := types.EncodeToBytes(e.Method)
+// 	if err != nil {
+// 		return e, err
+// 	}
 
-	era := o.Era
-	if !o.Era.IsMortalEra {
-		era = types.ExtrinsicEra{IsImmortalEra: true}
-	}
+// 	era := o.Era
+// 	if !o.Era.IsMortalEra {
+// 		era = types.ExtrinsicEra{IsImmortalEra: true}
+// 	}
 
-	payload := types.ExtrinsicPayloadV4{
-		ExtrinsicPayloadV3: types.ExtrinsicPayloadV3{
-			Method:      mb,
-			Era:         era,
-			Nonce:       o.Nonce,
-			Tip:         o.Tip,
-			SpecVersion: o.SpecVersion,
-			GenesisHash: o.GenesisHash,
-			BlockHash:   o.BlockHash,
-		},
-		TransactionVersion: o.TransactionVersion,
-	}
+// 	payload := types.ExtrinsicPayloadV4{
+// 		ExtrinsicPayloadV3: types.ExtrinsicPayloadV3{
+// 			Method:      mb,
+// 			Era:         era,
+// 			Nonce:       o.Nonce,
+// 			Tip:         o.Tip,
+// 			SpecVersion: o.SpecVersion,
+// 			GenesisHash: o.GenesisHash,
+// 			BlockHash:   o.BlockHash,
+// 		},
+// 		TransactionVersion: o.TransactionVersion,
+// 	}
 
-	pubkey, err := types.HexDecodeString(signer.PublicKey)
-	if err != nil {
-		panic(err)
-	}
-	signerPubKey := types.NewAddressFromAccountID(pubkey)
+// 	pubkey, err := types.HexDecodeString(signer.PublicKey)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	signerPubKey := types.NewAddressFromAccountID(pubkey)
 
-	// You would use this if you are using Ecdsa/ Ed25519 since it needs to return bytes
-	data, err := types.EncodeToBytes(payload)
-	if err != nil {
-		return e, err
-	}
+// 	// You would use this if you are using Ecdsa/ Ed25519 since it needs to return bytes
+// 	data, err := types.EncodeToBytes(payload)
+// 	if err != nil {
+// 		return e, err
+// 	}
 
-	sig, err := SignEcdsa(data, signer, "Ecdsa")
-	if err != nil {
-		return e, err
-	}
-	multiSig := types.MultiSignature{IsEcdsa: true, AsEcdsa: sig}
+// 	sig, err := SignEcdsa(data, signer, "Ecdsa")
+// 	if err != nil {
+// 		return e, err
+// 	}
+// 	multiSig := types.MultiSignature{IsEcdsa: true, AsEcdsa: sig}
 
-	// multiSig := types.MultiSignature{IsEd25519: true, AsEd25519: sig}
-	// You would use this if you are using Ecdsa since it needs to return bytes
+// 	// multiSig := types.MultiSignature{IsEd25519: true, AsEd25519: sig}
+// 	// You would use this if you are using Ecdsa since it needs to return bytes
 
-	extSig := types.ExtrinsicSignatureV4{
-		Signer:    signerPubKey,
-		Signature: multiSig,
-		Era:       era,
-		Nonce:     o.Nonce,
-		Tip:       o.Tip,
-	}
+// 	extSig := types.ExtrinsicSignatureV4{
+// 		Signer:    signerPubKey,
+// 		Signature: multiSig,
+// 		Era:       era,
+// 		Nonce:     o.Nonce,
+// 		Tip:       o.Tip,
+// 	}
 
-	e.Signature = extSig
+// 	e.Signature = extSig
 
-	// mark the extrinsic as signed
-	e.Version |= types.ExtrinsicBitSigned
+// 	// mark the extrinsic as signed
+// 	e.Version |= types.ExtrinsicBitSigned
 
-	return e, nil
+// 	return e, nil
 
-}
+// }
 
 func SignEcdsa(data []byte, signer EcdsaKeyringPair, scheme string) ([]byte, error) {
 	// if data is longer than 256 bytes, hash it first
@@ -942,114 +1192,114 @@ func GetAliceEd25519KeyringPair() signature.KeyringPair {
 	return keypair
 }
 
-func transferAliceEd25519ToBobSr25519() {
-	api := NewSubstrateAPI()
-	SetSerDeOptions()
-	metadata := GetMetadataLatest(api)
-	genesisHash := GetGenesisHash(api)
-	runtimeVersion := GetRuntimeVersionLatest(api)
+// func transferAliceEd25519ToBobSr25519() {
+// 	api := NewSubstrateAPI()
+// 	SetSerDeOptions()
+// 	metadata := GetMetadataLatest(api)
+// 	genesisHash := GetGenesisHash(api)
+// 	runtimeVersion := GetRuntimeVersionLatest(api)
 
-	aliceEd25519KeyringPair := GetAliceEd25519KeyringPair()
-	storageKey := CreateStorageKey(metadata, aliceEd25519KeyringPair.PublicKey)
-	accountInfo := GetStorageLatest(api, storageKey)
-	nonce := uint32(accountInfo.Nonce)
+// 	aliceEd25519KeyringPair := GetAliceEd25519KeyringPair()
+// 	storageKey := CreateStorageKey(metadata, aliceEd25519KeyringPair.PublicKey)
+// 	accountInfo := GetStorageLatest(api, storageKey)
+// 	nonce := uint32(accountInfo.Nonce)
 
-	// $ subkey inspect //Bob
-	// Secret Key URI `//Bob` is account:
-	// Secret seed:      0x398f0c28f98885e046333d4a41c19cee4c37368a9832c6502f6cfd182e2aef89
-	// Public key (hex): 0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48
-	// Account ID:       0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48
-	// SS58 Address:     5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty
-	bobSr25519 := NewAddressFromHexAccountID("0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48")
+// 	// $ subkey inspect //Bob
+// 	// Secret Key URI `//Bob` is account:
+// 	// Secret seed:      0x398f0c28f98885e046333d4a41c19cee4c37368a9832c6502f6cfd182e2aef89
+// 	// Public key (hex): 0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48
+// 	// Account ID:       0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48
+// 	// SS58 Address:     5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty
+// 	bobSr25519 := NewAddressFromHexAccountID("0x8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48")
 
-	options := types.SignatureOptions{
-		BlockHash:          genesisHash,
-		Era:                types.ExtrinsicEra{IsMortalEra: false},
-		GenesisHash:        genesisHash,
-		Nonce:              types.NewUCompactFromUInt(uint64(nonce)),
-		SpecVersion:        runtimeVersion.SpecVersion,
-		Tip:                types.NewUCompactFromUInt(0),
-		TransactionVersion: runtimeVersion.TransactionVersion,
-	}
+// 	options := types.SignatureOptions{
+// 		BlockHash:          genesisHash,
+// 		Era:                types.ExtrinsicEra{IsMortalEra: false},
+// 		GenesisHash:        genesisHash,
+// 		Nonce:              types.NewUCompactFromUInt(uint64(nonce)),
+// 		SpecVersion:        runtimeVersion.SpecVersion,
+// 		Tip:                types.NewUCompactFromUInt(0),
+// 		TransactionVersion: runtimeVersion.TransactionVersion,
+// 	}
 
-	call := CreateBalanceCall(metadata, bobSr25519, 3)
-	ext := types.NewExtrinsic(call)
+// 	call := CreateBalanceCall(metadata, bobSr25519, 3)
+// 	ext := types.NewExtrinsic(call)
 
-	// sign using Ed25519
-	extSigned, err := SignUsingEd25519(ext, aliceEd25519KeyringPair, options)
-	if err != nil {
-		panic(err)
-	}
+// 	// sign using Ed25519
+// 	extSigned, err := SignUsingEd25519(ext, aliceEd25519KeyringPair, options)
+// 	if err != nil {
+// 		panic(err)
+// 	}
 
-	hash, err := api.RPC.Author.SubmitExtrinsic(extSigned)
-	if err != nil {
-		fmt.Println(err.Error())
-		panic(err)
-	}
-	fmt.Printf("Transfer sent with extrinsic hash %#x\n", hash)
-}
+// 	hash, err := api.RPC.Author.SubmitExtrinsic(extSigned)
+// 	if err != nil {
+// 		fmt.Println(err.Error())
+// 		panic(err)
+// 	}
+// 	fmt.Printf("Transfer sent with extrinsic hash %#x\n", hash)
+// }
 
-func SignUsingEd25519(e types.Extrinsic, signer signature.KeyringPair, o types.SignatureOptions) (types.Extrinsic, error) {
-	if e.Type() != types.ExtrinsicVersion4 {
-		return e, fmt.Errorf("unsupported extrinsic version: %v (isSigned: %v, type: %v)", e.Version, e.IsSigned(), e.Type())
-	}
+// func SignUsingEd25519(e types.Extrinsic, signer signature.KeyringPair, o types.SignatureOptions) (types.Extrinsic, error) {
+// 	if e.Type() != types.ExtrinsicVersion4 {
+// 		return e, fmt.Errorf("unsupported extrinsic version: %v (isSigned: %v, type: %v)", e.Version, e.IsSigned(), e.Type())
+// 	}
 
-	mb, err := types.EncodeToBytes(e.Method)
-	if err != nil {
-		return e, err
-	}
+// 	mb, err := types.EncodeToBytes(e.Method)
+// 	if err != nil {
+// 		return e, err
+// 	}
 
-	era := o.Era
-	if !o.Era.IsMortalEra {
-		era = types.ExtrinsicEra{IsImmortalEra: true}
-	}
+// 	era := o.Era
+// 	if !o.Era.IsMortalEra {
+// 		era = types.ExtrinsicEra{IsImmortalEra: true}
+// 	}
 
-	payload := types.ExtrinsicPayloadV4{
-		ExtrinsicPayloadV3: types.ExtrinsicPayloadV3{
-			Method:      mb,
-			Era:         era,
-			Nonce:       o.Nonce,
-			Tip:         o.Tip,
-			SpecVersion: o.SpecVersion,
-			GenesisHash: o.GenesisHash,
-			BlockHash:   o.BlockHash,
-		},
-		TransactionVersion: o.TransactionVersion,
-	}
+// 	payload := types.ExtrinsicPayloadV4{
+// 		ExtrinsicPayloadV3: types.ExtrinsicPayloadV3{
+// 			Method:      mb,
+// 			Era:         era,
+// 			Nonce:       o.Nonce,
+// 			Tip:         o.Tip,
+// 			SpecVersion: o.SpecVersion,
+// 			GenesisHash: o.GenesisHash,
+// 			BlockHash:   o.BlockHash,
+// 		},
+// 		TransactionVersion: o.TransactionVersion,
+// 	}
 
-	signerPubKey := types.NewAddressFromAccountID(signer.PublicKey)
+// 	signerPubKey := types.NewAddressFromAccountID(signer.PublicKey)
 
-	data, err := types.EncodeToBytes(payload)
-	if err != nil {
-		return e, err
-	}
+// 	data, err := types.EncodeToBytes(payload)
+// 	if err != nil {
+// 		return e, err
+// 	}
 
-	sig, err := SignEd25519(data, signer, "Ed25519")
-	if err != nil {
-		return e, err
-	}
+// 	sig, err := SignEd25519(data, signer, "Ed25519")
+// 	if err != nil {
+// 		return e, err
+// 	}
 
-	multiSig := types.MultiSignature{IsEd25519: true, AsEd25519: sig}
+// 	multiSig := types.MultiSignature{IsEd25519: true, AsEd25519: sig}
 
-	// multiSig := types.MultiSignature{IsEd25519: true, AsEd25519: sig}
-	// You would use this if you are using Ecdsa since it needs to return bytes
+// 	// multiSig := types.MultiSignature{IsEd25519: true, AsEd25519: sig}
+// 	// You would use this if you are using Ecdsa since it needs to return bytes
 
-	extSig := types.ExtrinsicSignatureV4{
-		Signer:    signerPubKey,
-		Signature: multiSig,
-		Era:       era,
-		Nonce:     o.Nonce,
-		Tip:       o.Tip,
-	}
+// 	extSig := types.ExtrinsicSignatureV4{
+// 		Signer:    signerPubKey,
+// 		Signature: multiSig,
+// 		Era:       era,
+// 		Nonce:     o.Nonce,
+// 		Tip:       o.Tip,
+// 	}
 
-	e.Signature = extSig
+// 	e.Signature = extSig
 
-	// mark the extrinsic as signed
-	e.Version |= types.ExtrinsicBitSigned
+// 	// mark the extrinsic as signed
+// 	e.Version |= types.ExtrinsicBitSigned
 
-	return e, nil
+// 	return e, nil
 
-}
+// }
 
 func SignEd25519(data []byte, signer signature.KeyringPair, scheme string) (types.Signature, error) {
 	// if data is longer than 256 bytes, hash it first
